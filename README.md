@@ -43,7 +43,6 @@ Este projeto tem como objetivo demonstrar minhas habilidades com automação de 
 
 ```bash
 git clone https://github.com/seu-usuario/puppeteer-portal-transparencia.git
-cd puppeteer-portal-transparencia
 ````
 
 2. Instale as dependências:
