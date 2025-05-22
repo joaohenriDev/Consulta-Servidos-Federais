@@ -4,26 +4,36 @@ const cpfs = [
   '41467272000', '12574082672', '31988717949', '22413170200',
   '16170474220', '12834777268', '41700457772', '70322864704',
   '10311947204', '23593113953', '14324768668', '13556681153',
-  '91355354820', '22082220249'
+  '91355354820', '22082220249', '13238019449'
 ];
 
 const url = 'https://portaldatransparencia.gov.br/servidores/consulta?ordenarPor=nome&direcao=asc';
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Delay auxiliar para simular ações humanas
+async function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-async function clearAndType(page, selector, text) {
+async function clearAndTypeSlow(page, selector, text) {
   await page.evaluate(sel => {
     const el = document.querySelector(sel);
     if (el) el.value = '';
   }, selector);
-  await page.type(selector, text);
+
+  for (const char of text) {
+    await page.type(selector, char);
+    await delay(100);
+  }
 }
 
-async function clickIfExists(page, selector) {
+async function clickWithScroll(page, selector, delayAfter = 500) {
   await page.evaluate(sel => {
     const el = document.querySelector(sel);
-    if (el && !el.disabled && el.offsetParent !== null) el.click();
-  }, selector);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  await delay(500);
+  await page.click(selector);
+  await delay(delayAfter);
 }
 
 async function waitAndClickDetalhar(page) {
@@ -32,14 +42,20 @@ async function waitAndClickDetalhar(page) {
     return btns.length > 0 && btns[0].offsetParent !== null;
   }, { timeout: 10000 });
 
-  await delay(1000); // garantir renderização
-
+  await delay(1000);
+  await page.evaluate(() => {
+    const btns = Array.from(document.querySelectorAll('a[aria-label="Detalhar"]'));
+    if (btns.length) btns[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  await delay(700);
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll('a[aria-label="Detalhar"]'));
     if (btns.length) btns[0].click();
   });
 }
 
+
+// Abre a seção de histórico dos vínculos
 async function openHistoricoVinculos(page) {
   try {
     await page.waitForFunction(() => {
@@ -51,10 +67,10 @@ async function openHistoricoVinculos(page) {
     await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll('button.header'))
         .find(b => b.textContent.includes('Histórico dos vínculos com o Poder Executivo Federal'));
-      if (btn) btn.scrollIntoView({ behavior: 'auto', block: 'center' });
+      if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
 
-    await delay(500);
+    await delay(700);
 
     await page.evaluate(() => {
       const btn = Array.from(document.querySelectorAll('button.header'))
@@ -62,7 +78,7 @@ async function openHistoricoVinculos(page) {
       if (btn) btn.click();
     });
   } catch {
-    console.warn('⚠️ Botão "Histórico dos vínculos com o Poder Executivo Federal" não encontrado ou não clicável.');
+    console.warn('Botão "Histórico dos vínculos com o Poder Executivo Federal" não encontrado ou não clicável.');
   }
 }
 
@@ -78,41 +94,54 @@ async function openHistoricoVinculos(page) {
   for (const cpf of cpfs) {
     await page.goto(url, { waitUntil: 'networkidle2' });
 
+    // Rejeita cookies
+    await page.evaluate(() => {
+      const rejectBtn = document.querySelector('#accept-minimal-btn');
+      if (rejectBtn) rejectBtn.click();
+    });
+
     await page.waitForSelector('#btn-cpf-1', { timeout: 15000 });
-    await page.click('#btn-cpf-1');
+    await clickWithScroll(page, '#btn-cpf-1', 800);
 
     await page.waitForSelector('#cpf', { timeout: 15000 });
-    await clearAndType(page, '#cpf', cpf);
+    await clearAndTypeSlow(page, '#cpf', cpf);
 
     await page.waitForFunction(() => {
       const btn = document.querySelector('button.br-button.primary.btn-adicionar');
       return btn && !btn.disabled && btn.offsetParent !== null;
     }, { timeout: 15000 });
 
+    await page.evaluate(() => {
+      const btn = document.querySelector('button.br-button.primary.btn-adicionar');
+      if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+    await delay(700);
+
     await Promise.all([
-      page.waitForFunction(
-        cpf => Array.from(document.querySelectorAll('.br-tag')).some(tag => tag.textContent.includes(cpf)),
-        { timeout: 10000 },
-        cpf
-      ),
-      clickIfExists(page, 'button.br-button.primary.btn-adicionar')
+      page.waitForFunction(cpf => 
+        Array.from(document.querySelectorAll('.br-tag')).some(tag => tag.textContent.includes(cpf)), 
+        { timeout: 10000 }, cpf),
+      page.evaluate(() => {
+        const btn = document.querySelector('button.br-button.primary.btn-adicionar');
+        if (btn) btn.click();
+      })
     ]);
 
     await page.waitForSelector('button.btn-consultar', { timeout: 15000 });
-    await clickIfExists(page, 'button.btn-consultar');
+    await clickWithScroll(page, 'button.btn-consultar', 1000);
 
     try {
       await waitAndClickDetalhar(page);
     } catch {
-      console.warn(`❌ Nenhum resultado encontrado para CPF ${cpf}. Pulando...`);
+      console.warn(`Nenhum resultado encontrado para CPF ${cpf}. Pulando para o próximo...`);
       continue;
     }
 
     await openHistoricoVinculos(page);
 
-    await delay(10000); // aguarda para visualização manual se quiser
+    await delay(10000); // Tempo para visualização antes de ir para o próximo CPF
     console.log(`✅ Processado CPF: ${cpf}`);
   }
 
-  // await browser.close(); // descomente se quiser fechar o navegador no fim
+  // await browser.close();
 })();
